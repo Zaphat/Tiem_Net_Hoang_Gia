@@ -2,22 +2,23 @@
 
 # LAN Chat App
 
-Computer Networks Assignment
-USAGE
+Computer Networks Assignment\
 
-in terminal:
-python server.py
-python client.py
+USAGE\
 
-chat commands:
-/help
-/list
-/clear
-/private (username) message
-/quit
+in terminal:\
+python server.py\
+python client.py\
 
-features:
+chat commands:\
+/help\
+/list\
+/clear\
+/private (username) message\
+/quit\
 
-- share files between users
-- private chat to a user
-- Chat in Vietnamese is available
+features:\
+
+- share files between users\
+- private chat to a user\
+- Chat in Vietnamese is available\
