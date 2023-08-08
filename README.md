@@ -2,9 +2,9 @@
 
 # LAN Chat App
 
-Computer Networks Assignment\
+Computer Networks Assignment
 
-USAGE\
+USAGE
 
 in terminal:\
 python server.py\
