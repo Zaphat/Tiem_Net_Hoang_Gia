@@ -8,17 +8,17 @@ USAGE\
 
 in terminal:\
 python server.py\
-python client.py\
+python client.py
 
 chat commands:\
 /help\
 /list\
 /clear\
 /private (username) message\
-/quit\
+/quit
 
-features:\
+features:
 
-- share files between users\
-- private chat to a user\
-- Chat in Vietnamese is available\
+- share files between users
+- private chat to a user
+- Chat in Vietnamese is available
