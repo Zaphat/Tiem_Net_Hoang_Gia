@@ -4,50 +4,50 @@ import ctypes
 from sortedcontainers import SortedDict
 import re
 import sys
+import os
+import uuid
 # CLIENT[NICKNAME] = [SOCKET, ADDRESS]
 # {bytes: [socket.socket, (str, int)]}
 CLIENTS = SortedDict()
 
-# create a socket object
-chat_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# chat_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+# FILES[TOKEN] = (filename,file_server_path,owner)
+# {str: (bytes,str,bytes)}
+FILES = dict()
+LOCATION = uuid.uuid4().hex
 
+# create sockets for different purposes
+chat_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+file_upload_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+file_download_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 # get local machine name
 CHAT_HOST = socket.gethostname()
+FILE_UPLOAD_HOST = CHAT_HOST
+FILE_DOWNLOAD_HOST = CHAT_HOST
 CHAT_PORT = 9999
-
-
-file_transfer_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# file_transfer_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-FILE_HOST = socket.gethostname()
-FILE_PORT = 8080
+FILE_UPLOAD_PORT = 8080
+FILE_DOWNLOAD_PORT = 9000
 
 
 # allow only one instance of the chat_server to run
 try:
     chat_server.bind((CHAT_HOST, CHAT_PORT))
-    file_transfer_server.bind((FILE_HOST, FILE_PORT))
+    file_upload_server.bind((FILE_UPLOAD_HOST, FILE_UPLOAD_PORT))
+    file_download_server.bind((FILE_DOWNLOAD_HOST, FILE_DOWNLOAD_PORT))
 except:
     ctypes.windll.user32.MessageBoxW(
         0, "Another instance of the server is already running!", "Error", 1)
     sys.exit(0)
 # listen for clients
 chat_server.listen()
-file_transfer_server.listen()
-
-# transfer file from client to another client
-
-
-def transfer_file(sender_socket, receiver_socket, filename) -> None:
-    pass
+file_upload_server.listen()
+file_download_server.listen()
 
 
 def private_message(client_socket, nickname, message) -> None:
-    structure = re.compile(r'^(/private)\s(\(.{2,16}\))\s(.+)$')
+    structure = re.compile(r'^(/private)\s\((.{2,16})\)\s(.+)$')
     _, receiver, text = structure.match(message.decode('utf-8')).groups()
-    lookup_nickname = receiver[1:-1].encode('utf-8')
+    lookup_nickname = receiver.encode('utf-8')
     if lookup_nickname not in CLIENTS:
         send_to_client(
             client_socket, '————> User not found. Please try again.')
@@ -168,7 +168,7 @@ def on_connect(client_socket, address) -> None:
 # start accepting clients
 
 
-def accept() -> None:
+def accept_chat() -> None:
     while True:
         try:
             client_socket, address = chat_server.accept()
@@ -179,17 +179,103 @@ def accept() -> None:
         except:
             break
 
+# listen for file upload
+
+
+def on_file_upload(client_socket) -> None:
+    try:
+        metadata = client_socket.recv(2048)
+        # /upload (filename) (sender)
+        structure = re.compile(r'^(/upload)\s\((.{2,16})\)\s\((.+)\).*$')
+        _, sender, filename = structure.match(
+            metadata.decode('utf-8')).groups()
+
+        client_socket.send('READY'.encode('utf-8'))
+        # open directory for file storing
+        if not os.path.exists(LOCATION):
+            os.makedirs(LOCATION)
+        # generate a unique token for the file
+        TOKEN = uuid.uuid4().hex
+        while TOKEN in FILES:
+            TOKEN = uuid.uuid4().hex
+        # store file information
+        FILES[TOKEN] = (
+            filename.encode('utf-8'), f'{LOCATION}/{TOKEN}.{filename.split(".")[-1]}', sender.encode('utf-8'))
+        # store file in the directory
+        with open(f'{FILES[TOKEN][1]}', 'wb') as file:
+            while True:
+                data = client_socket.recv(1024)
+                if not data:
+                    break
+                file.write(data)
+        # notify the sender that the file has been uploaded
+        broadcast(
+            f'{sender} has uploaded a file', "SERVER")
+        # update the file list for all clients
+        for client_socket, _ in CLIENTS.values():
+            send_to_client(client_socket, '\x00UPDATE_FILE ' +
+                           f"({filename}) ({TOKEN})")
+    except:
+        return
+
+
+def accept_file_upload() -> None:
+    while True:
+        try:
+            client_socket, address = file_upload_server.accept()
+            thread = threading.Thread(
+                target=on_file_upload, args=(client_socket,))
+            thread.start()
+        except:
+            break
+
+
+# listen for file download
+def on_file_download(client_socket) -> None:
+    try:
+        TOKEN = client_socket.recv(1024).decode('utf-8')
+        if TOKEN not in FILES:
+            return
+        client_socket.send(FILES[TOKEN][0])
+
+        # send file content to client
+        with open(f'{FILES[TOKEN][1]}', 'rb') as file:
+            while True:
+                data = file.read(1024)
+                if not data:
+                    break
+                client_socket.send(data)
+        client_socket.close()
+    except:
+        return
+
+
+def accept_file_download() -> None:
+    while True:
+        try:
+            client_socket, address = file_download_server.accept()
+            thread = threading.Thread(
+                target=on_file_download, args=(client_socket,))
+            thread.start()
+        except:
+            break
+
 
 if __name__ == '__main__':
     import tkinter as tk
-    from tkinter import messagebox
     import sys
-
+    import shutil
     root = tk.Tk()
 
     def on_closing():
         root.destroy()
         chat_server.close()
+        file_upload_server.close()
+        file_download_server.close()
+        for client_socket, _ in CLIENTS.values():
+            client_socket.close()
+        if os.path.exists(LOCATION):
+            shutil.rmtree(LOCATION)
         sys.exit(0)
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
@@ -205,6 +291,15 @@ if __name__ == '__main__':
     tk.Label(root, text=f"PORT: {CHAT_PORT}").pack(pady=10)
 
     # start accepting clients
-    accept_thread = threading.Thread(target=accept)
-    accept_thread.start()
+    accept_chat_thread = threading.Thread(target=accept_chat)
+    accept_chat_thread.start()
+
+    # start accepting file upload
+    accept_file_upload_thread = threading.Thread(target=accept_file_upload)
+    accept_file_upload_thread.start()
+
+    # start accepting file download
+    accept_file_download_thread = threading.Thread(target=accept_file_download)
+    accept_file_download_thread.start()
+
     root.mainloop()

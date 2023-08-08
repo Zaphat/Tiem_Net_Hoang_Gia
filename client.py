@@ -4,7 +4,9 @@ import ctypes
 import threading
 import socket
 import sys
-from PySide6.QtWidgets import (QApplication, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout,
+import os
+import ntpath
+from PySide6.QtWidgets import (QApplication, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QFileDialog,
                                QScrollArea, QSizePolicy, QTextBrowser, QWidget, QLabel, QListWidget, QListWidgetItem)
 from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
                            QFont, QFontDatabase, QGradient, QIcon,
@@ -131,8 +133,10 @@ class ConnectFormGUI(QWidget):
 
     def connect(self):
         try:
-            client_socket.connect((self.ui.host_input.text(),
-                                   int(self.ui.port_input.text())))
+            chat_socket.connect((self.ui.host_input.text(),
+                                 int(self.ui.port_input.text())))
+            global server_host
+            server_host = self.ui.host_input.text()
             name_gui.show()
             self.close()
         except:
@@ -248,8 +252,8 @@ class NameFormGUI(QWidget):
     def enter_room(self) -> None:
         try:
             nickname = self.ui.nickname_input.text()
-            client_socket.send(nickname.encode('utf-8'))
-            message = client_socket.recv(1024).decode('utf-8')
+            chat_socket.send(nickname.encode('utf-8'))
+            message = chat_socket.recv(1024).decode('utf-8')
             if message == 'RESEND_NICK':
                 self.ui.warning_label.setText(
                     "Nickname already in use!")
@@ -262,7 +266,7 @@ class NameFormGUI(QWidget):
         except:
             ctypes.windll.user32.MessageBoxW(
                 0, "Cannot connect to the server!", "Error", 0)
-            client_socket.close()
+            chat_socket.close()
             sys.exit(0)
 
 
@@ -274,11 +278,11 @@ class ChatRoom(object):
     def setupUi(self, Widget):
         if not Widget.objectName():
             Widget.setObjectName(u"Widget")
-        Widget.resize(800, 600)
+        Widget.resize(850, 600)
 
         self.textBrowser = QTextBrowser(Widget)
         self.textBrowser.setObjectName(u"textBrowser")
-        self.textBrowser.setGeometry(QRect(10, 10, 650, 500))
+        self.textBrowser.setGeometry(QRect(10, 10, 650, 515))
         font = QFont()
         font.setFamilies([u"Arial"])
         font.setPointSize(14)
@@ -294,21 +298,36 @@ class ChatRoom(object):
         self.user_list = QListWidget(Widget)
         self.user_list.setObjectName(
             u"user_list")
-        self.user_list.setGeometry(QRect(0, 0, 120, 500))
+        self.user_list.setGeometry(QRect(0, 0, 170, 350))
+
+        self.file_list = QListWidget(Widget)
+        self.file_list.setObjectName(
+            u"file_list")
+        self.file_list.setGeometry(QRect(0, 0, 170, 125))
 
         # SCROLL AREA
         self.scrollArea = QScrollArea(Widget)
         self.scrollArea.setObjectName(u"scrollArea")
-        self.scrollArea.setGeometry(QRect(670, 40, 120, 470))
+        self.scrollArea.setGeometry(QRect(670, 40, 170, 350))
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scrollArea.setWidget(self.user_list)
 
+        # FILE SCROLL AREA
+        self.file_scrollArea = QScrollArea(Widget)
+        self.file_scrollArea.setObjectName(u"file_scrollArea")
+        self.file_scrollArea.setGeometry(QRect(670, 400, 170, 125))
+        self.file_scrollArea.setWidgetResizable(True)
+        self.file_scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.file_scrollArea.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff)
+        self.file_scrollArea.setWidget(self.file_list)
+
         # ONLINE USERS LABEL
         self.label = QLabel(Widget)
         self.label.setObjectName(u"label")
-        self.label.setGeometry(QRect(670, 10, 120, 31))
+        self.label.setGeometry(QRect(700, 5, 120, 30))
         self.label.setFont(font)
         self.label.setText(
             QCoreApplication.translate("Widget", u"Online Users", None))
@@ -318,6 +337,11 @@ class ChatRoom(object):
         self.pushButton.setObjectName(u"pushButton")
         self.pushButton.setGeometry(QRect(680, 540, 80, 35))
 
+        # SEND FILE BUTTON
+        self.send_file_button = QPushButton(Widget)
+        self.send_file_button.setObjectName(u"send_file_button")
+        self.send_file_button.setGeometry(QRect(770, 540, 50, 35))
+
         self.retranslateUi(Widget)
         QMetaObject.connectSlotsByName(Widget)
 
@@ -326,6 +350,8 @@ class ChatRoom(object):
             QCoreApplication.translate("Widget", u"LAN Chatter", None))
         self.pushButton.setText(
             QCoreApplication.translate("Widget", u"Send", None))
+        self.send_file_button.setText(
+            QCoreApplication.translate("Widget", u"File", None))
         # restrict resizing windows
         Widget.setFixedSize(Widget.size())
 
@@ -342,6 +368,7 @@ class ChatRoomGUI(QWidget):
         self.ui = ChatRoom()
         self.ui.setupUi(self)
         self.ui.pushButton.clicked.connect(self.send_message)
+        self.ui.send_file_button.clicked.connect(self.upload_file)
         self.ui.plainTextEdit.setFocus()
         self.ui.plainTextEdit.installEventFilter(self)
         self.ui.plainTextEdit.textChanged.connect(
@@ -362,11 +389,18 @@ class ChatRoomGUI(QWidget):
         self.font = QFont()
         self.font.setPointSize(13)
         self.font.setBold(True)
+        self.ui.file_scrollArea.setAlignment(Qt.AlignTop)
+        self.ui.file_list.setLayout(QVBoxLayout())
+        self.ui.file_list.layout().setAlignment(Qt.AlignTop)
 
         self.ui.user_list.itemClicked.connect(
             lambda item: self.ui.plainTextEdit.setPlainText(
                 f"/private ({item.text()}) ")
             if item.text() != user_name.decode('utf-8') + " (You)" else None)
+
+        self.ui.file_list.itemClicked.connect(
+            lambda item: self.download_file(item.data(Qt.UserRole))
+        )
 
     def eventFilter(self, watched: QObject, event: any) -> bool:
         if watched == self.ui.plainTextEdit:
@@ -381,7 +415,7 @@ class ChatRoomGUI(QWidget):
                     return True
         return super().eventFilter(watched, event)
 
-    def __send_message(self, message: str) -> None:
+    def _send_message_(self, message: str) -> None:
         if self.help_pattern.match(message):
             self.ui.textBrowser.append(
                 "-----------------------------   List of commands   -----------------------------\n")
@@ -401,7 +435,7 @@ class ChatRoomGUI(QWidget):
             ctypes.windll.user32.MessageBoxW(
                 0, "You have left the chatroom!", "Info", 0)
             self.close()
-            client_socket.close()
+            chat_socket.close()
             sys.exit(0)
         if self.clear_pattern.match(message):
             self.ui.textBrowser.clear()
@@ -409,7 +443,7 @@ class ChatRoomGUI(QWidget):
             return
         if self.private_pattern.match(message):
             valid_private_pattern = re.compile(
-                r"^[\n\s]*(/private)\s+(\(.{2,16}\))\s+(.+)$")
+                r"^[\n\s]*(/private)\s+\((.{2,16})\)\s+(.+)$")
             if valid_private_pattern.match(message):
                 _, receiver, content = valid_private_pattern.match(
                     message).groups()
@@ -418,12 +452,12 @@ class ChatRoomGUI(QWidget):
                     self.ui.textBrowser.append(
                         "---- Warning: Cannot send empty message!\n")
                     return
-                # client_socket.send(
-                #    f"/private {receiver} {content.strip()}".encode('utf-8'))
-                send_to_server(f'/private {receiver} {content.strip()}')
+
+                send_to_server(
+                    chat_socket, f'/private ({receiver}) {content.strip()}')
 
                 self.ui.textBrowser.append(
-                    f"You to {receiver[1:-1]}: {content.strip()}")
+                    f"You to {receiver}: {content.strip()}")
                 self.ui.plainTextEdit.clear()
                 return
             else:
@@ -434,18 +468,71 @@ class ChatRoomGUI(QWidget):
         if self.null_pattern.match(message):
             self.ui.plainTextEdit.clear()
             return
-        send_to_server(message)
+        send_to_server(chat_socket, message)
         self.ui.textBrowser.append("You: " + message)
         self.ui.plainTextEdit.clear()
 
     def send_message(self) -> None:
         try:
-            self.__send_message(self.ui.plainTextEdit.toPlainText())
+            self._send_message_(self.ui.plainTextEdit.toPlainText().strip())
         except:
             self.ui.textBrowser.append(
-                "---------------------------   Cannot connect to the server!  ---------------------------\n")
+                "                           ------   Cannot connect to the server!   ------                           \n")
             self.ui.pushButton.setEnabled(False)
-            client_socket.close()
+
+    def upload_file(self) -> None:
+        upload_socket = socket.socket(
+            socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            upload_socket.connect((server_host, 8080))
+            # open dialog to choose file
+            # save absolute path of the file
+            file_path = os.path.abspath(
+                QFileDialog.getOpenFileName(self, "Open File", "", "All Files (*.*)")[0])
+            # extract file name from file path
+            file_name = ntpath.basename(file_path)
+            # check if file name is valid
+            if not file_name:
+                return
+            # send metadata to server
+            send_to_server(upload_socket,
+                           f"/upload ({user_name.decode('utf-8')}) ({file_name})")
+            # receive signal from server to start sending file content
+            signal = upload_socket.recv(1024).decode('utf-8')
+            if signal == "READY":
+                with open(file_path, 'rb') as file:
+                    file_data = file.read()
+                    upload_socket.sendall(file_data)
+        except:
+            self.ui.textBrowser.append(
+                "                           ------   Cannot connect to the server!   ------                           \n")
+        finally:
+            upload_socket.close()
+
+    def download_file(self, token) -> None:
+        download_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            download_socket.connect((server_host, 9000))
+            download_socket.send(token.encode('utf-8'))
+            file_name = download_socket.recv(1024).decode('utf-8')
+            save_path = QFileDialog.getSaveFileName(
+                self, "Save File", file_name, f"")[0]
+            if not ntpath.basename(save_path):
+                return
+            with open(save_path, 'wb') as file:
+                while True:
+                    data = download_socket.recv(1024)
+                    if not data:
+                        break
+                    file.write(data)
+                file.close()
+                self.ui.textBrowser.append(
+                    "                      ------   File has been saved to your machine   -----                      \n")
+        except:
+            self.ui.textBrowser.append(
+                "                   ------   ERROR: Failed to download attachment   ------                  \n")
+        finally:
+            download_socket.close()
 
     def update_user_list(self, update=None) -> None:
         if update:
@@ -460,6 +547,12 @@ class ChatRoomGUI(QWidget):
                     user.decode('utf-8') if user != user_name else user.decode('utf-8') + " (You)")
                 item.setFont(self.font)
                 self.ui.user_list.addItem(item)
+
+    def update_file_list(self, file_name, token) -> None:
+        item = QListWidgetItem(file_name.decode('utf-8'))
+        item.setFont(self.font)
+        item.setData(Qt.UserRole, token.decode('utf-8'))
+        self.ui.file_list.addItem(item)
 
     def start_room(self) -> None:
 
@@ -476,7 +569,7 @@ class ChatRoomGUI(QWidget):
 # ---------------------------------------------------TCP Socket Programming----------------------------------------------------
 
 
-def send_to_server(message: str) -> None:
+def send_to_server(client_socket, message: str) -> None:
     if len(message) < 1024:
         message = message + (1024-len(message))*'\x00'
         client_socket.send(message.encode('utf-8'))
@@ -493,14 +586,12 @@ def send_to_server(message: str) -> None:
 
 
 def receive() -> None:
-    update_pattern = re.compile(rb'\x00+UPDATE \((.+)\)\x00*')
-    remove_pattern = re.compile(rb'\x00+REMOVE \((.+)\)\x00*')
-    null_pattern = re.compile(rb'\x00+')
-    null_text_pattern = re.compile(r'^\[.*?\]:[\s\x00]+$')
     while True:
         try:
-            message = client_socket.recv(1024)
-            if update_pattern.match(message):
+            message = chat_socket.recv(1024)
+            if len(message) < 1024:
+                continue
+            elif update_pattern.match(message):
                 new_user = update_pattern.match(message).group(1)
                 online_users.add(new_user)
                 chat_room.update_user_list(update=new_user)
@@ -510,42 +601,39 @@ def receive() -> None:
                 online_users.remove(remove_user)
                 chat_room.update_user_list()
                 continue
+            elif new_file_pattern.match(message):
+                file_name, token = new_file_pattern.match(message).groups()
+                chat_room.update_file_list(file_name, token)
+                continue
             elif null_pattern.match(message):
                 continue
-
             raw_message = message.decode('utf-8')
             if null_text_pattern.match(raw_message):
                 continue
             chat_room.ui.textBrowser.append(raw_message)
         except:
             chat_room.ui.textBrowser.append(
-                "---------------------------   Cannot connect to the server!  ---------------------------\n")
+                "                           ------   Cannot connect to the server!   ------                           \n")
             chat_room.ui.pushButton.setEnabled(False)
-            client_socket.close()
             break
 
 
-def receive_file() -> None:
-    pass
-
-
-def send_file() -> None:
-    pass
-
-
 # ------------------------------------------------------Global Variables-------------------------------------------------------
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-file_transfer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-FILE_PORT = 8080
+chat_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_host = None
 app = QApplication(sys.argv)
 login = ConnectFormGUI()
 name_gui = NameFormGUI()
 chat_room = ChatRoomGUI()
 online_users = set()
 user_name = b""
-
+update_pattern = re.compile(rb'\x00+UPDATE \((.+)\)\x00*')
+remove_pattern = re.compile(rb'\x00+REMOVE \((.+)\)\x00*')
+new_file_pattern = re.compile(rb'\x00+UPDATE_FILE \((.+)\) \((.+)\)\x00*')
+null_pattern = re.compile(rb'\x00+')
+null_text_pattern = re.compile(r'^\[.*?\]:[\s\x00]+$')
 # ----------------------------------------------------------Main----------------------------------------------------------
 if __name__ == "__main__":
     login.show()
-    app.aboutToQuit.connect(lambda: client_socket.close())
+    app.aboutToQuit.connect(lambda: chat_socket.close())
     sys.exit(app.exec())

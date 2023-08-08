@@ -1,6 +1,8 @@
 # Tiem_Net_Hoang_Gia
-Nơi gáy dơ cùng các bờ rồ trong mạng LAN
 
+# LAN Chat App
+
+Computer Networks Assignment
 USAGE
 
 in terminal:
@@ -14,4 +16,8 @@ chat commands:
 /private (username) message
 /quit
 
+features:
 
+- share files between users
+- private chat to a user
+- Chat in Vietnamese is available
