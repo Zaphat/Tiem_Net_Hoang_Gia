@@ -127,8 +127,7 @@ class ConnectFormGUI(QWidget):
         # restrict resizing windows
         self.setFixedSize(self.size())
 
-        # set default value for host and port
-        self.ui.host_input.setText("Z-DESKTOP")
+        # set default value for port
         self.ui.port_input.setText("9999")
 
     def connect(self):
