@@ -3,17 +3,18 @@
 # LAN Chat App
 
 Computer Networks Assignment
+
 USAGE
 
-in terminal:
-python server.py
+in terminal:\
+python server.py\
 python client.py
 
-chat commands:
-/help
-/list
-/clear
-/private (username) message
+chat commands:\
+/help\
+/list\
+/clear\
+/private (username) message\
 /quit
 
 features:
